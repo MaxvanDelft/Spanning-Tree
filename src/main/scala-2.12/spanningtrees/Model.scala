@@ -201,8 +201,8 @@ class Model(m: Int) {
   println(  s"vertical step matrix WW:\n${makeString(WW)}\n")
   println(s"horizontal step matrix GG:\n${makeString(GG)}\n")
 
-  val WG  = multiply(WW,GG)      ; //println(     s"E-letter matrix WG:\n${makeString(WG)}\n" )
-  val GW  = multiply(GG,WW)      ; //println(     s"3-letter matrix GW:\n${makeString(GW)}\n" )
+  val WG  = multiply(WW,GG)      ; println(     s"E-letter matrix WG:\n${makeString(WG)}\n" )
+  val GW  = multiply(GG,WW)      ; println(     s"3-letter matrix GW:\n${makeString(GW)}\n" )
   val WGS = mapMatrix(WG, toSize); println(s"E-letter size matrix WGS:\n${makeString(WGS)}\n")
   val GWS = mapMatrix(GW, toSize); println(s"3-letter size matrix GWS:\n${makeString(GWS)}\n")
 
@@ -216,8 +216,8 @@ class Model(m: Int) {
   val DWGS = DenseMatrix.tabulate(WGS.length, WGS.length){case (i, j) => WGS(i)(j).toDouble}
   val DGWS = DenseMatrix.tabulate(GWS.length, GWS.length){case (i, j) => GWS(i)(j).toDouble}
 
-  println(s"E-letter dense matrix DWGS:\n${DWGS.toString}\n")
-  println(s"3-letter dense matrix DGWS:\n${DGWS.toString}\n")
+  //println(s"E-letter dense matrix DWGS:\n${DWGS.toString}\n")
+  //println(s"3-letter dense matrix DGWS:\n${DGWS.toString}\n")
 
   val zv = DenseVector.ones[Double](GWS.length)
   val p1 = DWGS \ zv
