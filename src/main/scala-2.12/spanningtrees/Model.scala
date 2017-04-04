@@ -3,82 +3,7 @@ package spanningtrees
 import java.io.PrintWriter
 
 import scala.reflect.ClassTag
-//import breeze.linalg._
-
-abstract class Letter {
-
-  def actionSet: Set[Int]
-
-  case class Compound(actionSet: Set[Int]) extends Letter
-
-  def getVHpartition: (Seq[Int], Seq[Int]) = actionSet.toList.sorted.partition(_<0)
-
-  def edgeNumberToString(e: Int) = s"${(('0'+e).toChar)}"
-
-  val vhseparator = ":"
-  override def toString: String = {
-    if (actionSet.isEmpty) return "I"
-    val (vs,hs) = getVHpartition
-    val vstr = vs.reverse.map{v => edgeNumberToString(-v)}.mkString
-    val hstr = hs        .map{h => edgeNumberToString( h)}.mkString
-    s"$vstr$vhseparator$hstr"
-  }
-  def *(other: Letter): Letter = (this,other) match {
-    case (Letter.One , _) => other
-    case (_, Letter.One ) => this
-    case (_, _          ) => Compound(this.actionSet++other.actionSet)
-  }
-}
-object Letter {
-  object One  extends Letter {def actionSet = Set.empty}
-
-  abstract class BasicAction(e: Int) extends Letter {val actionSet = Set(e)}
-  case class AddVEdge(e: Int) extends BasicAction(-e) // Note the minus!
-  case class AddHEdge(e: Int) extends BasicAction( e)
-}
-
-class LetterChoice(val letters: Set[Letter]) {
-  import LetterChoice.{Zero,One}
-
-  def size = letters.size
-
-  def +(other: LetterChoice): LetterChoice = (this,other) match {
-    case (Zero, _) => other
-    case (_, Zero) => this
-    case (_, _)    => new LetterChoice(this.letters++other.letters)
-  }
-  def *(other: LetterChoice): LetterChoice = (this,other) match {
-    case (Zero, _) => Zero
-    case (_, Zero) => Zero
-    case (One , _) => other
-    case (_, One ) => this
-    case (_,  _  ) => new LetterChoice(distributedAddMultiply(this.letters.toList, other.letters.toList).toSet) ///// TBD
-  }
-  def distributedAddMultiply (letters1: List[Letter], letters2: List[Letter]): List[Letter] = {
-    letters1.foldLeft(Nil:List[Letter]) {(list: List[Letter], letter1: Letter) => distributedMultiply(letter1, letters2):::list}
-  }
-  def distributedMultiply (letter1: Letter, letters: List[Letter]): List[Letter] = {
-    letters.foldLeft(List[Letter]()) {(list: List[Letter], letter2: Letter) => (letter1*letter2)::list}
-  }
-
-  // C*D: cartesian product over the choices of C and D
-
-  override def toString: String = if (letters.isEmpty) "@" else letters.mkString("|")
-/*
-  def compactToString: String = if (letters.isEmpty) "0"
-                                else {
-                                  val s = letters.size
-                                  if (s ==1 && letters==Set(Letter.One)) "I"
-                                  else s.toString
-                                }
-*/
-}
-object LetterChoice {
-  object Zero extends LetterChoice(Set.empty)
-  object One  extends LetterChoice(Set(Letter.One))
-  case class AddVEdge(e: Int) extends LetterChoice(Set(Letter.AddVEdge(e)))
-  case class AddHEdge(e: Int) extends LetterChoice(Set(Letter.AddHEdge(e)))
-}
+import breeze.linalg._
 
 
 /**
@@ -233,7 +158,7 @@ class Model(m: Int) {
   }
   val ncps       = computeNonCrossingPartitions
 
-  val statesList: Vector[State] = ncps.map{ ncp => ncp.map(_.toSet).toSet }.toVector
+  val statesList: scala.Vector[State] = ncps.map{ ncp => ncp.map(_.toSet).toSet }.toVector
 
   val statesMap: Map[State, Int] = statesList.zipWithIndex.toMap
   def nStates                    = statesList.size
@@ -267,8 +192,8 @@ class Model(m: Int) {
   def W(e: Int) = setDiagonalToIdentity(V(e))
   def G(e: Int) = setDiagonalToIdentity(H(e))
 
-  for (i <- 1 to m) println( s"W($i):\n${makeString(W(i))}\n")
-  for (i <- 0 to m) println( s"G($i):\n${makeString(G(i))}\n")
+  //for (i <- 1 to m) println( s"W($i):\n${makeString(W(i))}\n")
+  //for (i <- 0 to m) println( s"G($i):\n${makeString(G(i))}\n")
 
   val WW: TransitionMatrix = (1 to m).foldLeft(identityTransitionMatrix) {(tm:TransitionMatrix, i:Int) => multiply(tm, W(i))}
   val GG: TransitionMatrix = (0 to m).foldLeft(identityTransitionMatrix) {(tm:TransitionMatrix, i:Int) => multiply(tm, G(i))}
@@ -278,14 +203,31 @@ class Model(m: Int) {
 
   val WG  = multiply(WW,GG)      ; //println(     s"E-letter matrix WG:\n${makeString(WG)}\n" )
   val GW  = multiply(GG,WW)      ; //println(     s"3-letter matrix GW:\n${makeString(GW)}\n" )
-  val WGS = mapMatrix(WG, toSize); println(s"E-letter size matrix WG:\n${makeString(WGS)}\n")
-  val GWS = mapMatrix(GW, toSize); println(s"3-letter size matrix GW:\n${makeString(GWS)}\n")
+  val WGS = mapMatrix(WG, toSize); println(s"E-letter size matrix WGS:\n${makeString(WGS)}\n")
+  val GWS = mapMatrix(GW, toSize); println(s"3-letter size matrix GWS:\n${makeString(GWS)}\n")
 
-  val WG1 = mapMatrix(WG, to01  ); println(s"E-letter 01 matrix WG:\n${makeString(WG1)}\n")
-  val GW1 = mapMatrix(GW, to01  ); println(s"3-letter 01 matrix GW:\n${makeString(GW1)}\n")
+  // val WG1 = mapMatrix(WG, to01  ); println(s"E-letter 01 matrix WG1:\n${makeString(WG1)}\n")
+  // val GW1 = mapMatrix(GW, to01  ); println(s"3-letter 01 matrix GW1:\n${makeString(GW1)}\n")
 
-  val WGR = WG1.map(_.sum)
-  val GWR = GW1.map(_.sum)
+  // This does not work well: matrix created mirrored over the diagonal
+  // val DWGS = new DenseMatrix(WGS.length, WGS.length, WGS.flatten)
+  // val DGWS = new DenseMatrix(GWS.length, GWS.length, GWS.flatten)
+
+  val DWGS = DenseMatrix.tabulate(WGS.length, WGS.length){case (i, j) => WGS(i)(j).toDouble}
+  val DGWS = DenseMatrix.tabulate(GWS.length, GWS.length){case (i, j) => GWS(i)(j).toDouble}
+
+  println(s"E-letter dense matrix DWGS:\n${DWGS.toString}\n")
+  println(s"3-letter dense matrix DGWS:\n${DGWS.toString}\n")
+
+  val zv = DenseVector.ones[Double](GWS.length)
+  val p1 = DWGS \ zv
+  val p2 = DGWS \ zv
+
+  println(s"E-letter dense matrix DWGS \\ ones:\n${p1.toString}\n")
+  println(s"3-letter dense matrix DWGS \\ ones:\n${p2.toString}\n")
+
+  //val WGR = WG1.map(_.sum)
+  //val GWR = GW1.map(_.sum)
 
   // For a stationary matrix, we could normalize the rows of WG1 and GW1 until their sums become 0,
   // and then solve xP = I (for P=WG1,WG2).
@@ -307,7 +249,6 @@ class Model(m: Int) {
   dotFile.println(MarkovChainGrapher.graphvizulize("Markov structure", statesList, WGS))
   dotFile.close()
 
-
   def run {
   }
 
@@ -317,6 +258,6 @@ class Model(m: Int) {
 object Model {
 
   def main(args: Array[String]) = {
-    for (m <- 1 to 3) new Model(m).run
+    for (m <- 1 to 2) new Model(m).run
   }
 }
