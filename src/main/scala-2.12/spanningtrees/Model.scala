@@ -258,6 +258,6 @@ class Model(m: Int) {
 object Model {
 
   def main(args: Array[String]) = {
-    for (m <- 1 to 2) new Model(m).run
+    for (m <- 1 to 4) new Model(m).run
   }
 }
