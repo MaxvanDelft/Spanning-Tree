@@ -20,4 +20,4 @@ Now according to Dijkstra's method: The multiplication of two of these matrices 
 
 The addition corresponds to the set union.
 
-Let W = prod_{i=1}^m Wi and G = prod_{i=1}^{m+1} Gi. Then E = WG is the partition matrix for E-letters (The E-letters are encoded by which vertical edges were added and which horizontal edges where removed). Also F=GW is the partition matrix for 3-letters.
+Let W = prod_{i=1}^{m-1} Wi and G = prod_{i=1}^{m} Gi. Then E = WG is the partition matrix for E-letters (The E-letters are encoded by which vertical edges were added and which horizontal edges where removed). Also F=GW is the partition matrix for 3-letters.
