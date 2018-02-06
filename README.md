@@ -1,3 +1,4 @@
+# Computation of the partition matrix
 
 My father came up with a nifty algorithm to compute the partition matrix.  First we separate the letter into elementary letters. These letters look very much like the identity letter: = (the letter with all horizontal edges). The only difference is they have one extra vertical edge or one missing horizontal edge. The ones with an extra vertical edge we call vertical elementary letters, and with a missing horizontal edge we call horizontal elementary letters. For these elementary letters it is easy to check whether the letter can be added to a start partition and to compute the end partition is easy too, because they look so much like the identity. We will exploit this further.
 
@@ -12,8 +13,8 @@ V_i + I is the matrix where either vertical edge i is added or not.
 H_i + I is the matrix where either horizontal edge i is removed or not.
 
 Let
-*W_i = V_i + I,
-*G_i = H_i + I
+* W_i = V_i + I,
+* G_i = H_i + I
 
 Now according to Dijkstra's method: The multiplication of two of these matrices gives all paths of 2 letters. We must define the right multiplication operator: S_1*S_2 = set of all (s_1*s_2) for all s_1 in S_1, s_2 in S_2.
 
