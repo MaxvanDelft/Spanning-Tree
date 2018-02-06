@@ -16,7 +16,7 @@ Let
 * Wi = Vi + I,
 * Gi = Hi + I
 
-Now according to Dijkstra's method: The multiplication of two of these matrices gives all paths of 2 letters. We must define the right multiplication operator: S1*S2 = set of all (s1*s2) for all s1 in S1, s2 in S2.
+Now according to Dijkstra's method: The multiplication of two of these matrices gives all paths of 2 letters. We must define the right multiplication operator: S1&astS2 = set of all (s1&asts2) for all s1 in S1, s2 in S2.
 
 The addition corresponds to the set union.
 
