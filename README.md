@@ -1,17 +1,22 @@
-# Spanning-Tree
-Generate spanning trees on grid graphs
+# Computation of the partition matrix
 
-# Introduction
-We intend to prove/disprove whether we can uniformly generate spanning trees on \infty \times m grid graphs by socalled Subshifts of Finite Type (SFT). The idea is to split a spanning tree into 1 \times m boxes, the graphs inside the boxes we will call 'letters' in the alphabet of all subgraphs of the 1 \times m box. They are not necessarily spanning forests, for instance we could take the letter to be one single horizontal edge, when we would have to make a spanning tree on both sides of the lattice. 
+André van Delft came up with a nifty algorithm to compute the partition matrix.  First we separate the letter into elementary letters. These letters look very much like the identity letter: = (the letter with all horizontal edges). The only difference is they have one extra vertical edge or one missing horizontal edge. The ones with an extra vertical edge we call vertical elementary letters, and with a missing horizontal edge we call horizontal elementary letters. For these elementary letters it is easy to check whether the letter can be added to a start partition and to compute the end partition is easy too, because they look so much like the identity. We will exploit this further.
 
-Not all subgraphs are letters. For example, every letter contains at least one horizontal edge
-To each box (or letter) we associate a unique set of points (vertices), namely the ones on the left hand side of the box. We allow vertical edges to only occur on the left hand side of the box, so that concatenation of letters doesn't lead to multi-edges.
-Not all letters can follow eachother. Loops are not allowed and, for example, suppose we have a vertex in a certain box that is not connected to any other vertex. Then in the box to the left hand side the unique horizontal edge toward that vertex must be contained. 
-This way we want to generate a spanning tree. We might hope to connect the letters through some Markov Chain. But the problem is more difficult, since a spanning tree does not contain loops. In a sequence of letters that are allowed to follow eachother piecewise, it might not result in a spanning tree because a loop might be created over a longer distance. For this we need extra information of each box. It turns out that knowledge of the route at which two vertices are connected is enough. We add an extra symbol in {+,-}, where + indicates the whole path connecting two vertices lies to the left of the box, and - indicates otherwise. This is done for every pair of vertices on the left vertical line of points associated to the box. There are 1/2m(m-1) of these, and another 2m-1 {0,1}-values indicate whether an edge is present or not.
+For all these elementary letters there is a transition matrix from partition to partition. We computed them, but instead of filling them with ones and zero's we filled them with the vertical/horizontal index that was added/removed or the empty set if the letter did not cause that transition. Each vertical elementary letter vi is in this way associated to a matrix Vi and each horizontal edge hi is associated to a matrix Hi.
 
-There are two well-known ways to randomly generate a spanning tree
+The multiplication of Vi and Vj for any i,j yields a matrix with all possible transition caused by the identity letter, but where both vertical edges i and j are also present. The same holds for horizontal elementary letters.
 
-* Wilson's Algorithm
-* Aldous Broder Algorithm
+Let the identity matrix I be the matrix with the empty string on the diagonal and the empty set elsewhere.
 
-More info: http://www.maths.bath.ac.uk/~aj276/teaching/USF/USFnotes.pdf
+Vi + I is the matrix where either vertical edge i is added or not.
+Hi + I is the matrix where either horizontal edge i is removed or not.
+
+Let
+* Wi = Vi + I,
+* Gi = Hi + I
+
+Now according to Dijkstra's method: The multiplication of two of these matrices gives all paths of 2 letters. We must define the right multiplication operator: S1\*S2 = set of all (s1\*s2) for all s1 in S1, s2 in S2.
+
+The addition corresponds to the set union.
+
+Let W = prod_{i=1}^{m-1} Wi and G = prod_{i=1}^{m} Gi. Then E = WG is the partition matrix for E-letters (The E-letters are encoded by which vertical edges were added and which horizontal edges were removed). Also F=GW is the partition matrix for 3-letters.
