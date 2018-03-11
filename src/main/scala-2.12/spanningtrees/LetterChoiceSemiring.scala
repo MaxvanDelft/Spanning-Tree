@@ -1,4 +1,5 @@
 package spanningtrees
+
 import breeze.math.Semiring
 /**
   * Attempt to use Breeze matrix facilities with LetterChoice.
