@@ -159,7 +159,7 @@ class Model(m: Int) {
     result
   }
 
-  val ncps       = computeNonCrossingPartitions
+  val ncps       = computeNonCrossingPartitions.reverse
 
   val partitionsList: scala.Vector[Partition] = ncps.map{ ncp => ncp.map(_.toSet).toSet }.toVector
 
@@ -221,7 +221,7 @@ class Model(m: Int) {
     dotFile.close()
 
     /*
-    // the following code is experimental; attempts to use Breeze failed up to now
+    // the following code is experimental; it attempts to use Breeze, but that fails
 
     // val WG1 = mapMatrix(WG, to01  ); println(s"E-letter 01 matrix WG1:\n${makeString(WG1)}\n")
     // val GW1 = mapMatrix(GW, to01  ); println(s"3-letter 01 matrix GW1:\n${makeString(GW1)}\n")
@@ -294,14 +294,30 @@ class Model(m: Int) {
     //
     // Step 1. Create PartitionLetterAdjacencyMatrix
     // Step 1.1 Find meaningful partition-letter combinations and map to partition indexes (used in WG) and letters
-    // nPLs counts these combinations, identified so far
+    //
+    //   A combination of partition p and letter l is "meaningful" if there is a transition with letter l to partition p
+    //
+    //   Why "meaningful" rather than just the carthesian product of partions and letters?
+    //   The latter would yield impractically large matrices, with (P*L)^2 elements,
+    //   where P and L are the number of partitions and letters.
+    //
+    //   We also need reverse mapping, for a dense matrix display:
+    //   - mapPIndexAndLetterToPLIndex: from a partition and a letter to the row in the PartitionLetter matrix
+    //     A row represents the from-node in the markov chain; it represents both a partition and a letter
+    //   - mapPIndexForAnyLetterToPLIndex from a partition to any column in the PartitionLetter matrix which relates to that partition, irrespective of the letter
+    //     Note that for getting the column you cannot use the previous mapping, because the letter there belongs to the from-node
+    //
+    // In the process of computing the PartitionLetterAdjacencyMatrix,
+    // we naively identify the meaningful combinations; we do not know in advance how many ther
+    // nPLs counts these combinations, identified so far.
+    // Finally nPLs has become the dimension of the resulting PartitionLetterAdjacencyMatrix
 
     var mapPIndexAndLetterToPLIndex    = scala.collection.mutable.Map[(Int, Letter), Int]()
     var mapPIndexForAnyLetterToPLIndex = scala.collection.mutable.Map[Int, Int]()
     var mapPLIndexToPIndex             = scala.collection.mutable.Map[Int, Int]()
     var mapPLIndexToLetter             = scala.collection.mutable.Map[Int, Letter]()
 
-    val do3Letter = true // we only do 1 type of letter here. A for-loop would allow for both E-letters and 3-letters
+    val do3Letter = false // we only do 1 type of letter here. A for-loop would allow for both E-letters and 3-letters
 
     println(s"Letter type (3/E): ${if (do3Letter) "3" else "E"}")
     println
@@ -309,38 +325,39 @@ class Model(m: Int) {
     val E_or_3_LetterMatrix = if (do3Letter) GW else WG
 
     var nPLs = 0
-    for (i <- 0 until nPartitions) {
-      val row = E_or_3_LetterMatrix(i)
-      for (j <- 0 until nPartitions) {
-        val letterSet: Set[Letter] = row(j).letters
-        val pIndex = j
-        for (letter <- letterSet) {
-          if (!mapPIndexAndLetterToPLIndex.isDefinedAt((pIndex,letter))) {
+
+    for (i <- 0 until nPartitions;
+         row = E_or_3_LetterMatrix(i);
+         j <- 0 until nPartitions;
+         letterSet = row(j).letters;
+         pColIndex = j;
+         letter <- letterSet
+          // pColIndex corresponds to a column, i.e. an end partition.
+          // Define (end partition, letter) node if it had not been already
+          if !mapPIndexAndLetterToPLIndex.isDefinedAt((pColIndex,letter))
+         ) {
             val plIndex = nPLs
-            mapPIndexAndLetterToPLIndex((pIndex,letter)) = plIndex
-            mapPIndexForAnyLetterToPLIndex(pIndex)       = plIndex
-            mapPLIndexToPIndex(plIndex) = pIndex
+            mapPIndexAndLetterToPLIndex((pColIndex,letter)) = plIndex
+            mapPIndexForAnyLetterToPLIndex(pColIndex)       = plIndex
+            mapPLIndexToPIndex(plIndex) = pColIndex
             mapPLIndexToLetter(plIndex) = letter
             nPLs += 1
-          }
-        }
-      }
     }
 
-    println("Mapping from partition index and letter")
+    println("Mapping from partition-letter-index to partition index and letter")
     for (i <- 0 until nPLs) {
       println(f"$i%2d ${mapPLIndexToPIndex(i)}%2d ${mapPLIndexToLetter(i)}")
     }
     println
 
     // Step 1.2 Using these mappings fill the matrix
+    // Recall: The nodes correspond to (end partition, previous letter) or shorthand (l,p).
+    // In any sequence l1 p1 l2 p2 of 2 end partitions and previous letters
+    // the possible partition transition that l2 causes depends ONLY on p1,l2 and p2; NOT on l1
     val P3E: PartitionLetterAdjacencyMatrix = Array.tabulate(nPLs, nPLs)( {(row, col) =>
-//      val pIndex = mapPLIndexToPIndex(col)
-//      val letter = mapPLIndexToLetter(col)
-//      if (mapPIndexAndLetterToPLIndex((pIndex, letter)) == row) 1 else 0
-      val pIndex1 = mapPLIndexToPIndex(row)
-      val pIndex2 = mapPLIndexToPIndex(col)
-      val letter  = mapPLIndexToLetter(col)
+      val pIndex1 = mapPLIndexToPIndex(row) // end partition 1, though it now serves as a begin partition (p1)
+      val pIndex2 = mapPLIndexToPIndex(col) // end partition 2, serves as end partition (p2)
+      val letter  = mapPLIndexToLetter(col) // previous letter 2, a letter that potentially causes partition transition from pIndex1 to pIndex2 (l2)
       if (E_or_3_LetterMatrix(pIndex1)(pIndex2).letters.contains(letter)) 1 else 0
     })
     println
@@ -350,6 +367,8 @@ class Model(m: Int) {
     //    and corresponding left eigenvector EigU and right eigenvector EigV.
     //    Breeze computes the right eigenvectors only directly;
     //    But you get left eigenvectors when you do the operation on the transposed matrix
+
+    println(s"Computing eigenvalues...")
 
     val DPE = DenseMatrix.tabulate(nPLs, nPLs){case (i, j) => (P3E(i)(j)).toDouble}
     val DPE_Transposed = DPE.t
@@ -376,7 +395,7 @@ class Model(m: Int) {
     val maxLambdaIndex_Right = argmax(eigStuff_Right.eigenvalues)
     val maxLambdaIndex_Left  = argmax(eigStuff_Left .eigenvalues)
 
-/*
+    /* Uncomment if desired:
     println(s"lambdas right: ${eigStuff_Right.eigenvalues}")
     println(s"lambdas left: ${eigStuff_Left.eigenvalues}")
     println
@@ -384,19 +403,19 @@ class Model(m: Int) {
     println
     println(s"eigVectors left:\n${eigStuff_Left.eigenvectors}")
     println
-*/
+    */
     val eigVector_maxLambda_Right = eigStuff_Right.eigenvectors(::, maxLambdaIndex_Right)
     val eigVector_maxLambda_Left  = eigStuff_Left .eigenvectors(::, maxLambdaIndex_Left )
 
     println(s"maxLambda_Right: ${maxLambda_Right}")
     println(s"maxLambda_Left : ${maxLambda_Left }")
+    /* Uncomment if desired:
     println(s"maxLambdaIndex_Right: ${maxLambdaIndex_Right}")
     println(s"maxLambdaIndex_Left : ${maxLambdaIndex_Left }")
-
+    */
     println(s"eigVector_maxLambda_Right: ${eigVector_maxLambda_Right}")
     println(s"eigVector_maxLambda_Left : ${eigVector_maxLambda_Left}")
-    println(s"eigVector_maxLambda_Right: ${eigVector_maxLambda_Right}")
-    println(s"eigVector_maxLambda_Left : ${eigVector_maxLambda_Left}")
+    println
 
     // Step 3. Compute the stationary distribution
 
@@ -406,7 +425,6 @@ class Model(m: Int) {
 
     println(s"eigVector_maxLambda_LeftTimesRight: ${eigVector_maxLambda_LeftTimesRight}")
     println(s"eigVector_maxLambda_LeftTimesRight_sum_1: ${eigVector_maxLambda_LeftTimesRight_sum_1}")
-
     println
 
     // Step 4. Compute the probability matrix of the partition-letter combinations
@@ -432,9 +450,23 @@ class Model(m: Int) {
     println
 
     // Step 5. Derive the denser probability matrix notation
-
+    //
+    // In the partition matrix each cell contains a letter set.
+    // We need a variant where each cell contains this letter set,
+    //   plus a probability that holds for any of these letters.
+    //   Note: each letter in such a cell has the same transition probability.
+    // For each cell in the partition matrix from partition P1 to partition P2
+    //   we can take any letter, say L, from the set,
+    //   and look this up in the partitionLetterProbabilityMatrix.
+    //   partitionLetterProbabilityMatrix(row, column) means:
+    //     the transition probability from the partition of the row (letter is irrelevant)
+    //                                  to the partition&letter of the column
+    //
+    // So take this partitionLetterProbabilityMatrix cell:
+    //  row: any row that relates to P1, irrespective of the letter that the row relates to
+    //  column: identified by P2 & L
     val ppm: PartitionProbabilityMatrix = Array.tabulate[(Double, LetterChoice)](nPartitions,nPartitions) { case (i,j) =>
-       val letterSet   = E_or_3_LetterMatrix(i)(j)
+      val letterSet   = E_or_3_LetterMatrix(i)(j)
       val letters     = letterSet.letters
       val probability = if (letters.isEmpty) 0 else {
         val aLetter   = letters.head
@@ -445,10 +477,19 @@ class Model(m: Int) {
       (probability, letterSet)
     }
 
+    val nLetterOccurences = mapMatrix(E_or_3_LetterMatrix, toSize).map(_.sum).sum
+    println(s"Number of letter occurences in Partition Matrix = $nLetterOccurences"); println
+    println(s"Markov matrix dimension = $nPLs")                                     ; println
 
-    def makePString[A](m: PartitionProbabilityMatrix): String = m.map(row=>{row.map(elt=>formatProbabilityAndLetterChoice(elt))}.mkString(",")).mkString("\n")
+    // This code is nice, but creates a big string so that the VM may run out of memory with m=4:
+    //
+    //def makePString[A](m: PartitionProbabilityMatrix): String = m.map(row=>{row.map(elt=>formatProbabilityAndLetterChoice(elt))}.mkString(",")).mkString("\n")
+    //
+    //println(s"Dense probability matrix:\n${makePString(ppm)}\n")
+    //
 
-    println(s"Dense probability matrix:\n${makePString(ppm)}\n")
+    println(s"Dense probability matrix:")
+    ppm.map{row => {println( row.map(elt=>formatProbabilityAndLetterChoice(elt)).mkString(","))}}
     println
 
   } // run method
@@ -457,10 +498,14 @@ class Model(m: Int) {
 
 object Model {
 
-  val startM = 1
-  val   endM = 2
 
   def main(args: Array[String]) = {
+    var startM = 2
+    var   endM = 2
+    if (args.size > 0) {
+      startM = args(0).toInt
+      endM   = if (args.size > 1) args(1).toInt else startM
+    }
     for (m <- startM to endM) new Model(m).run
   }
 }
