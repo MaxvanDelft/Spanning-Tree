@@ -3,13 +3,15 @@ package spanningtrees
 import java.io.PrintWriter
 
 import scala.reflect.ClassTag
-import breeze.linalg._, eigSym.EigSym
+import breeze.linalg._
+import eigSym.EigSym
 
+import scala.collection.mutable
 
 /**
   *
   */
-class Model(m: Int) {
+class Model(m: Int, traceLevel: Int, traceSpecifiers: Set[String]) {
 
   type IntSeqPartition                = List[List[Int]]
   type IntPartition                   = Set[Set[Int]]
@@ -18,6 +20,15 @@ class Model(m: Int) {
   type PartitionAdjacencyMatrix       = Matrix[LetterChoice] // instead of 0's and 1's this contains letter choices
   type PartitionProbabilityMatrix     = Matrix[(Double, LetterChoice)] // for each letterchoice there is a probability per letter in the choice
   type PartitionLetterAdjacencyMatrix = Matrix[Int]
+
+  def makeString[A](m: Matrix[A]): String = m.map(row=>{row.map(elt=>elt.toString)}.mkString(",")).mkString("\n")
+  def toSize(letterChoice: LetterChoice): Int = letterChoice.size
+  def to01(  letterChoice: LetterChoice): Int = if (letterChoice.size==0) 0 else 1
+
+  import Model._
+  def trace_eigenvalues      = traceLevel >= 4 || traceSpecifiers.contains(TRACESPECIFIER_EIGENVALUES)
+  def trace_partitions       = traceLevel >= 1 || traceSpecifiers.contains(TRACESPECIFIER_PARTITIONS)
+
 
   // bit messy: square matrix assumed
   def mapMatrix[A,B](m: Matrix[A], f: A => B)(implicit tag: ClassTag[B]): Matrix[B] = Array.tabulate[B](m.length,m.length){ (x,y) => f(m(x)(y)) }
@@ -188,10 +199,6 @@ class Model(m: Int) {
 
     def setDiagonalToIdentity(tm: PartitionAdjacencyMatrix): PartitionAdjacencyMatrix = {for (i <- 0 to nPartitions-1) tm(i)(i) = LetterChoice.One; tm }
 
-    def makeString[A](m: Matrix[A]): String = m.map(row=>{row.map(elt=>elt.toString)}.mkString(",")).mkString("\n")
-    def toSize(letterChoice: LetterChoice): Int = letterChoice.size
-    def to01(  letterChoice: LetterChoice): Int = if (letterChoice.size==0) 0 else 1
-
     def V(e: Int) = getSingleEdgeActionMatrix(e, forHorizontal = false)
     def H(e: Int) = getSingleEdgeActionMatrix(e, forHorizontal =  true)
 
@@ -262,12 +269,29 @@ class Model(m: Int) {
     // end of experimental code
     */
 
+    GlobalResults.setNumberOfNodesAndEdges(m=m, graph="PartitionGraph", letterType="ELetter", numNodes=nPartitions, numEdges=mapMatrix(WG,toSize).map(_.sum).sum)
+    GlobalResults.setNumberOfNodesAndEdges(m=m, graph="PartitionGraph", letterType="3Letter", numNodes=nPartitions, numEdges=mapMatrix(GW,toSize).map(_.sum).sum)
+
+    // false::true::Nil map analyse_E_or_3_LetterMatrix   would be the same as the next 2 lines
+    analyse_E_or_3_LetterMatrix(do3Letter=false, E_or_3_LetterMatrix=WG)
+    analyse_E_or_3_LetterMatrix(do3Letter= true, E_or_3_LetterMatrix=GW)
+    analyse_E_or_3_LetterMatrixStartPartition(do3Letter=false, E_or_3_LetterMatrix=WG)
+    analyse_E_or_3_LetterMatrixStartPartition(do3Letter= true, E_or_3_LetterMatrix=GW)
+    // doStateWithEndPartition: Create states (letter, end partition) as opposed to states (start partition, letter)
+  }
+
+
+  def analyse_E_or_3_LetterMatrix(do3Letter: Boolean, E_or_3_LetterMatrix: PartitionAdjacencyMatrix) {
+    // we only do 1 type of letter here. A for-loop would allow for both E-letters and 3-letters
+
     // Now compute probabilities for random trees:
     //   what is the chance to get a specific letter at a specific partition
     // All letters that induce the same partition transition must have the same chance. Why? Just logical?
     //
     // 1. To compute the probability matrix we consider adjacency matrices for partition-letter combinations,
-    //    so this yields a Markov chain. Then between 2 nodes there is at most 1 edge, no multi-edges.
+    //    so this yields a Markov chain. Then between 2 nodes there is at most 1 edge, no multi-edges. The
+    //    partitions in the partition-letter combination (for which we compute the adjacency matrix) have to
+    //    either all be start partitions or they are all end partitions.
     //
     // 2. Of such matrices we compute the maximum eigenvalue Lambda
     //    and corresponding left eigenvector EigU and right eigenvector EigV.
@@ -317,31 +341,23 @@ class Model(m: Int) {
     var mapPLIndexToPIndex             = scala.collection.mutable.Map[Int, Int]()
     var mapPLIndexToLetter             = scala.collection.mutable.Map[Int, Letter]()
 
-    val do3Letter = false // we only do 1 type of letter here. A for-loop would allow for both E-letters and 3-letters
-
     println(s"Letter type (3/E): ${if (do3Letter) "3" else "E"}")
-    println
-
-    val E_or_3_LetterMatrix = if (do3Letter) GW else WG
+    println("="*50)
 
     var nPLs = 0
 
-    for (i <- 0 until nPartitions;
-         row = E_or_3_LetterMatrix(i);
-         j <- 0 until nPartitions;
-         letterSet = row(j).letters;
-         pColIndex = j;
+    for (i      <- 0 until nPartitions; row = E_or_3_LetterMatrix(i);
+         j      <- 0 until nPartitions; letterSet = row(j).letters; pColIndex = j;
          letter <- letterSet
-          // pColIndex corresponds to a column, i.e. an end partition.
-          // Define (end partition, letter) node if it had not been already
-          if !mapPIndexAndLetterToPLIndex.isDefinedAt((pColIndex,letter))
-         ) {
-            val plIndex = nPLs
-            mapPIndexAndLetterToPLIndex((pColIndex,letter)) = plIndex
-            mapPIndexForAnyLetterToPLIndex(pColIndex)       = plIndex
-            mapPLIndexToPIndex(plIndex) = pColIndex
-            mapPLIndexToLetter(plIndex) = letter
-            nPLs += 1
+         // pColIndex corresponds to a column, i.e. an end partition.
+         // Define (end partition, letter) node if it had not been already
+         if !mapPIndexAndLetterToPLIndex.isDefinedAt((pColIndex,letter))
+    ) {
+      val plIndex = nPLs
+      mapPIndexAndLetterToPLIndex((pColIndex,letter)) = plIndex
+      mapPLIndexToPIndex(plIndex) = pColIndex
+      mapPLIndexToLetter(plIndex) = letter
+      nPLs += 1
     }
 
     println("Mapping from partition-letter-index to partition index and letter")
@@ -351,13 +367,13 @@ class Model(m: Int) {
     println
 
     // Step 1.2 Using these mappings fill the matrix
-    // Recall: The nodes correspond to (end partition, previous letter) or shorthand (l,p).
-    // In any sequence l1 p1 l2 p2 of 2 end partitions and previous letters
-    // the possible partition transition that l2 causes depends ONLY on p1,l2 and p2; NOT on l1
+    // Recall: The nodes correspond to (letter, end partition) or shorthand (l,p).
+    // In any sequence l1 p1 l2 p2 of two end partitions and two letters the possibility of the partition
+    // transition from (l1,p1) to (l2,p2) depends ONLY on p1,l2 and p2; NOT on l1
     val P3E: PartitionLetterAdjacencyMatrix = Array.tabulate(nPLs, nPLs)( {(row, col) =>
-      val pIndex1 = mapPLIndexToPIndex(row) // end partition 1, though it now serves as a begin partition (p1)
-      val pIndex2 = mapPLIndexToPIndex(col) // end partition 2, serves as end partition (p2)
-      val letter  = mapPLIndexToLetter(col) // previous letter 2, a letter that potentially causes partition transition from pIndex1 to pIndex2 (l2)
+      val pIndex1 = mapPLIndexToPIndex(row) // index of end partition p1 in some state (l1,p1), though it now serves as a begin partition in the transition from p1 to p2
+    val pIndex2 = mapPLIndexToPIndex(col) // index of p2 in (l2,p2)
+    val letter  = mapPLIndexToLetter(col) // letter l2 in (l2,p2), a letter that potentially causes partition transition from p1 to p2
       if (E_or_3_LetterMatrix(pIndex1)(pIndex2).letters.contains(letter)) 1 else 0
     })
     println
@@ -429,49 +445,56 @@ class Model(m: Int) {
 
     // Step 4. Compute the probability matrix of the partition-letter combinations
 
-    val u = eigVector_maxLambda_Right
+    val v = eigVector_maxLambda_Right
     val lambda = maxLambda_Right
 
-//    val densePartitionLetterProbabilityMatrix = DenseMatrix.tabulate(nPLs, nPLs){case (i, j) =>
-//      (u(j)*P3E(i)(j))/(lambda*u(i))
-//    }
-//
-//    println(s"PartitionLetterProbabilityMatrix: ${densePartitionLetterProbabilityMatrix}")
-//    println
+    //    val densePartitionLetterProbabilityMatrix = DenseMatrix.tabulate(nPLs, nPLs){case (i, j) =>
+    //      (u(j)*P3E(i)(j))/(lambda*u(i))
+    //    }
+    //
+    //    println(s"PartitionLetterProbabilityMatrix: ${densePartitionLetterProbabilityMatrix}")
+    //    println
 
 
-    val partitionLetterProbabilityMatrix = Array.tabulate[Double](nPLs,nPLs) { case (i,j) => (u(j)*P3E(i)(j))/(lambda*u(i)) }
+    val partitionLetterProbabilityMatrix = Array.tabulate[Double](nPLs,nPLs) { case (i,j) => (v(j)*P3E(i)(j))/(lambda*v(i)) }
 
     def formatProbability(d: Double) = f"$d%1.3f".replace("0.",".").replace(".000",".   ")
     def formatProbabilityMatrix(pm: Matrix[Double]) = pm.map{ row => row.map(formatProbability).mkString(" ")}.mkString("\n")
     def formatProbabilityAndLetterChoice(plc: (Double, LetterChoice)): String = s"${formatProbability(plc._1)}=>${plc._2}"
 
-    println(s"Probability matrix:\n${formatProbabilityMatrix(partitionLetterProbabilityMatrix)}")
-    println
+    // only print the Probability matrix for small m
 
-    // Step 5. Derive the denser probability matrix notation
-    //
-    // In the partition matrix each cell contains a letter set.
-    // We need a variant where each cell contains this letter set,
-    //   plus a probability that holds for any of these letters.
-    //   Note: each letter in such a cell has the same transition probability.
-    // For each cell in the partition matrix from partition P1 to partition P2
-    //   we can take any letter, say L, from the set,
-    //   and look this up in the partitionLetterProbabilityMatrix.
-    //   partitionLetterProbabilityMatrix(row, column) means:
-    //     the transition probability from the partition of the row (letter is irrelevant)
-    //                                  to the partition&letter of the column
-    //
-    // So take this partitionLetterProbabilityMatrix cell:
-    //  row: any row that relates to P1, irrespective of the letter that the row relates to
-    //  column: identified by P2 & L
-    val ppm: PartitionProbabilityMatrix = Array.tabulate[(Double, LetterChoice)](nPartitions,nPartitions) { case (i,j) =>
-      val letterSet   = E_or_3_LetterMatrix(i)(j)
-      val letters     = letterSet.letters
-      val probability = if (letters.isEmpty) 0 else {
-        val aLetter   = letters.head
-        val plIndex1  = mapPIndexForAnyLetterToPLIndex(i)
-        val plIndex2  = mapPIndexAndLetterToPLIndex((j,aLetter))
+    if (m <= 1)
+    {
+      println(s"Probability matrix:\n${formatProbabilityMatrix(partitionLetterProbabilityMatrix)}")
+      println
+    }
+
+
+    // We have states (end partition, letter): transitions correspond to sequences l1pl2q
+    // Check that P(l1plq)=P(l2plq) for all l1,l2 that can proceed p
+    // Check that P(lpl1q)=P(lpl2q) for all l1,l2 that cause transition pq
+
+    // Now that we checked P(l1pl2q)=P(l3pl4q) for all l1,l3 that can proceed p and all l2,l4
+    // that cause transition pq we may compute the matrix A where: a_{pq} = P(l1pl2q) for any l1
+    // that can proceed p and any l2 that causes transition pq
+
+
+    // Step 5. Derive the denser probability matrix notation for states (letter, end partition)
+    // For any transition pq, find any l1 that can proceed p and any l2 that causes transition pq
+    // Then let a_{pq} = P( (l1,p) , (l2,q) ), which we obtained earlier
+    val ppm: PartitionProbabilityMatrix = Array.tabulate[(Double, LetterChoice)](nPartitions,nPartitions) { case (p,q) =>
+      val letterSet        = E_or_3_LetterMatrix(p)(q)
+      val letters          = letterSet.letters
+      val probability      = if (letters.isEmpty) 0 else {
+        def letterThatCanProceed(pindex: Int) = E_or_3_LetterMatrix.collectFirst{
+          case row if row(pindex).size > 0 => row(pindex).letters.head
+        }.get // we are sure that every column in the partition matrix contains a letter, so we
+              // can get the result without checking whether it exists.
+        val l1       = letterThatCanProceed(p)      // some letter that can proceed p
+        val l2       = letters.head                 // some letter that causes transition pq
+        val plIndex1 = mapPIndexAndLetterToPLIndex((p,l1))
+        val plIndex2 = mapPIndexAndLetterToPLIndex((q,l2))
         partitionLetterProbabilityMatrix(plIndex1)(plIndex2)
       }
       (probability, letterSet)
@@ -492,20 +515,361 @@ class Model(m: Int) {
     ppm.map{row => {println( row.map(elt=>formatProbabilityAndLetterChoice(elt)).mkString(","))}}
     println
 
+
+    println(s"Dense probability matrix for states: (letter, end partition), and letter type: ${if (do3Letter) "3" else "E"}")
+    ppm.map{row => {println( row.map(elt=>formatProbability(elt._1)).mkString(","))}}
+    println
+
+    val ltype = {if(do3Letter) "3Letter" else "ELetter"}
+    GlobalResults.setNumberOfNodesAndEdges(m=m, graph="LetterEndPartitionGraph", letterType=ltype, numNodes=nPLs, numEdges=P3E.map(_.sum).sum)
+  } // run method
+
+
+
+
+
+
+  def parryMatrix(A:Array[Array[Int]]) = {
+    val n = A.size
+    val DPE = DenseMatrix.tabulate(n,n){case (i, j) => (A(i)(j)).toDouble}
+    val DPE_Transposed = DPE.t
+
+    val eigStuff_Right = eig(DPE)
+    val eigStuff_Left  = eig(DPE_Transposed)
+
+    // check that imaginary parts of the eigenvalues are close to 0
+    val NONZERO_TOLERANCE = 1e-10 // observed was: 9e-15
+    for (ev <- eigStuff_Right.eigenvaluesComplex) {
+      if (Math.abs(ev) > NONZERO_TOLERANCE) {
+        println(s"WARNING: Eigenvalue with nonzero imaginary part: $ev")
+      }
+    }
+    for (ev <- eigStuff_Left.eigenvaluesComplex) {
+      if (Math.abs(ev) > NONZERO_TOLERANCE) {
+        println(s"WARNING: Eigenvalue with nonzero imaginary part: $ev")
+      }
+    }
+
+    //val eigenvalues = eigStuff.eigenvalues
+    val maxLambda_Right      =    max(eigStuff_Right.eigenvalues)
+    val maxLambda_Left       =    max(eigStuff_Left .eigenvalues)
+    val maxLambdaIndex_Right = argmax(eigStuff_Right.eigenvalues)
+    val maxLambdaIndex_Left  = argmax(eigStuff_Left .eigenvalues)
+
+    if (trace_eigenvalues) {
+      println(s"lambdas right: ${eigStuff_Right.eigenvalues}")
+      println(s"lambdas left: ${eigStuff_Left.eigenvalues}")
+      println
+      println(s"eigVectors right:\n${eigStuff_Right.eigenvectors}")
+      println
+      println(s"eigVectors left:\n${eigStuff_Left.eigenvectors}")
+      println
+    }
+    val eigVector_maxLambda_Right = eigStuff_Right.eigenvectors(::, maxLambdaIndex_Right)
+    val eigVector_maxLambda_Left  = eigStuff_Left .eigenvectors(::, maxLambdaIndex_Left )
+
+    //println(s"maxLambda_Right: ${maxLambda_Right}")
+    //println(s"maxLambda_Left : ${maxLambda_Left }")
+
+
+
+
+    /* Uncomment if desired:
+    println(s"maxLambdaIndex_Right: ${maxLambdaIndex_Right}")
+    println(s"maxLambdaIndex_Left : ${maxLambdaIndex_Left }")
+    */
+
+
+    //println(s"eigVector_maxLambda_Right: ${eigVector_maxLambda_Right}")
+    //println(s"eigVector_maxLambda_Left : ${eigVector_maxLambda_Left}")
+    //println
+
+
+    // Step 3. Compute the stationary distribution
+
+    val eigVector_maxLambda_LeftTimesRight = eigVector_maxLambda_Left *:* eigVector_maxLambda_Right
+    val sum_values = sum(eigVector_maxLambda_LeftTimesRight)
+    val eigVector_maxLambda_LeftTimesRight_sum_1 = eigVector_maxLambda_LeftTimesRight / sum_values
+
+
+    //println(s"eigVector_maxLambda_LeftTimesRight: ${eigVector_maxLambda_LeftTimesRight}")
+    //println(s"eigVector_maxLambda_LeftTimesRight_sum_1: ${eigVector_maxLambda_LeftTimesRight_sum_1}")
+    //println
+
+
+    // Step 4. Compute the probability matrix of the partition-letter combinations
+
+    val v = eigVector_maxLambda_Right
+    val lambda = maxLambda_Right
+
+    //    val densePartitionLetterProbabilityMatrix = DenseMatrix.tabulate(nPLs, nPLs){case (i, j) =>
+    //      (u(j)*P3E(i)(j))/(lambda*u(i))
+    //    }
+    //
+    //    println(s"PartitionLetterProbabilityMatrix: ${densePartitionLetterProbabilityMatrix}")
+    //    println
+
+
+    Array.tabulate[Double](n,n) { case (i,j) => (v(j)*A(i)(j))/(lambda*v(i)) }
+  }
+
+  // ===================================================================================================================
+  // ===================================================================================================================
+  // ===================================================================================================================
+  // ===================================================================================================================
+  // ===================================================================================================================
+  // ===================================================================================================================
+  // ===================================================================================================================
+
+  def analyse_E_or_3_LetterMatrixStartPartition(do3Letter: Boolean, E_or_3_LetterMatrix: PartitionAdjacencyMatrix) {
+    var mapPIndexAndLetterToPLIndex    = scala.collection.mutable.Map[(Int, Letter), Int]()
+    var mapPIndexForAnyLetterToPLIndex = scala.collection.mutable.Map[Int, Int]()
+    var mapPLIndexToPIndex             = scala.collection.mutable.Map[Int, Int]()
+    var mapPLIndexToLetter             = scala.collection.mutable.Map[Int, Letter]()
+
+    //println(s"Letter type (3/E): ${if (do3Letter) "3" else "E"}")
+    //println("="*50)
+
+    var nPLs = 0
+
+    for (i      <- 0 until nPartitions; row = E_or_3_LetterMatrix(i);  startPartitionIndex = i;
+         j      <- 0 until nPartitions; letterSet = row(j).letters;
+         letter <- letterSet
+          // pColIndex corresponds to a column, i.e. an end partition.
+          // Define nodes (letter, start partition)
+         ) {
+            val plIndex = nPLs
+            mapPIndexAndLetterToPLIndex((startPartitionIndex,letter)) = plIndex
+            mapPLIndexToPIndex(plIndex) = startPartitionIndex;
+            mapPLIndexToLetter(plIndex) = letter
+            nPLs += 1
+    }
+
+    //println("Mapping from partition-letter-index to partition index and letter")
+    //for (i <- 0 until nPLs) {
+    //  println(f"$i%2d ${mapPLIndexToPIndex(i)}%2d ${mapPLIndexToLetter(i)}")
+    //}
+    //println
+
+    // Step 1.2 Using these mappings fill the matrix
+    // Recall: The nodes correspond to (start partition, letter) or shorthand (l,p).
+    // In any sequence p1 l1 p2 l2 of two end partitions and two letters the possibility of the partition
+    // transition from (p1,l1) to (p2,l2) depends ONLY on p1,l1 and p2; NOT on l2
+    val P3E: PartitionLetterAdjacencyMatrix = Array.tabulate(nPLs, nPLs)( {(row, col) =>
+      val pIndex1 = mapPLIndexToPIndex(row) // index of p1 in (l1,p1)
+      val letter  = mapPLIndexToLetter(row) // letter l1 in (p1,l1), a letter that potentially causes partition transition from p1 to p2
+      val pIndex2 = mapPLIndexToPIndex(col) // index of start partition p2, though it now serves as an end partition in some state (p2,l2)
+      if (E_or_3_LetterMatrix(pIndex1)(pIndex2).letters.contains(letter)) 1 else 0
+    })
+    //println
+    //println(s"Partition Letter Matrix:\n${makeString(P3E)}\n")
+
+    val partitionLetterProbabilityMatrix = parryMatrix(P3E)
+
+    def formatProbability(d: Double) = f"$d%1.3f".replace("0.",".").replace(".000",".   ")
+    def formatProbabilityMatrix(pm: Matrix[Double]) = pm.map{ row => row.map(formatProbability).mkString(" ")}.mkString("\n")
+    def formatProbabilityAndLetterChoice(plc: (Double, LetterChoice)): String = s"${formatProbability(plc._1)}=>${plc._2}"
+
+    // only print the Probability matrix for small m
+
+    if (m <= 1)
+    {
+      println(s"Probability matrix:\n${formatProbabilityMatrix(partitionLetterProbabilityMatrix)}")
+      println
+    }
+
+    // We have states (start partition, letter): transitions correspond to sequences pl1ql2
+    // Check that P(p1l1ql)=P(p2l2ql) for all (p1,l1), (p2,l2) such that l1 causes transition p1q
+    // and such that l2 causes transition p2q
+
+
+    // States are (start partition, letter):
+    // Now that we checked that P(p1l1ql)=P(p2l2ql) for all (p1,l1), (p2,l2), we see that the
+    // probability P(pl1ql2) does not depend on p and l1. We may compute the matrix A where:
+    // a_{pq} = P(xl1pl2) for any (x,l1) such that l1 causes transition xp and any l2 that causes
+    // transition pq. Then a_{pq} does not depend on x,l1 and is the same for all l2 that cause the
+    // same partition transition. Suppose l2 causes transition pq. Define P(p,q) as the
+    // probability to go from p to q via any l2. Then P(p,q) = a_{pq}
+    //
+    //
+    // Define  for any l2 that
+    // causes transition pq. This probability only depends on the partitions p and q, even if we
+    // were given the sequence xl1pl2q.  not on partition x or l1 or l2
+
+
+    // Step 5. Derive the denser probability matrix notation for states (start partition, letter)
+    // For any partition transition qr, the probability that letter l2 causes transition qr is
+    // equal to P(pl1ql2) for any letter l that causes transition pq
+    // For any transition pq, find any (x,l1) such that l1 causes transition xp and find any l2 that
+    // causes transition pq
+    // Then let a_{pq} = P( (x,l1) , (p,l2) ), which we obtained earlier
+    val ppm: PartitionProbabilityMatrix = Array.tabulate[(Double, LetterChoice)](nPartitions,nPartitions) { case (p,q) =>
+      val letterSet        = E_or_3_LetterMatrix(p)(q)
+      val letters          = letterSet.letters
+      val probability      = if (letters.isEmpty) 0 else {
+        //def letterThatCanProceed(pindex: Int) = E_or_3_LetterMatrix.collectFirst{
+        //  case row if row(pindex).size > 0 => row(pindex).letters.head
+        //}.get
+        def partitionThatCanProceed(pindex: Int) = E_or_3_LetterMatrix.collectFirst{
+          case row if row(pindex).size > 0 => pindex
+        }.get // for every partition there exists a partition that can proceed it, so we can
+              // get the resulting partition without checking whether it exists.
+
+        //def letterThatCanFollow(pindex: Int) = E_or_3_LetterMatrix(pindex).collectFirst{
+        //  case elt if elt.size > 0 => elt.letters.head
+        //}.get // we are sure that there is a letter, so we can get it.
+        //val l1       = letterThatCanFollow(q)      // some letter that can follow q
+
+        val x        = partitionThatCanProceed(p)
+        val l1       = E_or_3_LetterMatrix(x)(p).letters.head
+        val l2       = letters.head                // some letter that causes transition pq
+        val plIndex1 = mapPIndexAndLetterToPLIndex((x,l1))
+        val plIndex2 = mapPIndexAndLetterToPLIndex((p,l2))
+        partitionLetterProbabilityMatrix(plIndex1)(plIndex2)
+      }
+      (probability, letterSet)
+    }
+
+    val nLetterOccurences = mapMatrix(E_or_3_LetterMatrix, toSize).map(_.sum).sum
+    //println(s"Number of letter occurences in Partition Matrix = $nLetterOccurences"); println
+    //println(s"Markov matrix dimension = $nPLs")                                     ; println
+
+    // This code is nice, but creates a big string so that the VM may run out of memory with m=4:
+    //
+    //def makePString[A](m: PartitionProbabilityMatrix): String = m.map(row=>{row.map(elt=>formatProbabilityAndLetterChoice(elt))}.mkString(",")).mkString("\n")
+    //
+    //println(s"Dense probability matrix:\n${makePString(ppm)}\n")
+    //
+
+    //println(s"Dense probability matrix:")
+    //ppm.map{row => {println( row.map(elt=>formatProbabilityAndLetterChoice(elt)).mkString(","))}}
+    //println
+
+
+    println(s"Dense probability matrix for states: (start partition, letter), and letter type: ${if (do3Letter) "3" else "E"}")
+    ppm.map{row => {println( row.map(elt=>formatProbability(elt._1)).mkString(","))}}
+    println
+
+    val ltype = {if(do3Letter) "3Letter" else "ELetter"}
+    GlobalResults.setNumberOfNodesAndEdges(m=m, graph="StartPartitionLetterGraph", letterType=ltype, numNodes=nPLs, numEdges=P3E.map(_.sum).sum)
   } // run method
 }
 
 
 object Model {
 
+  val DEFAULT_M           = 2
+  val MAX_M               = 5
+  val DEFAULT_TRACE_LEVEL = 2
+  val MAX_TRACE_LEVEL     = 5
 
-  def main(args: Array[String]) = {
-    var startM = 2
-    var   endM = 2
-    if (args.size > 0) {
-      startM = args(0).toInt
-      endM   = if (args.size > 1) args(1).toInt else startM
+  val TRACESPECIFIER_EIGENVALUES    = "eigenvalues"
+  val TRACESPECIFIER_PARTITIONS     = "partitions"
+
+  val ALLOWED_TRACESPECIFIERS = Set ( TRACESPECIFIER_EIGENVALUES
+                                    , TRACESPECIFIER_PARTITIONS
+                                    )
+
+
+  def usage(exitCode: Int = 1) = {
+    val msg =
+      s""" SpanningTrees by André & Max van Delft
+          |
+          |Usage:
+          |
+          |scala spanningtrees.Model [gridHeightRange] [-traceLevel] [-traceSpecifier...]
+          |
+          |gridHeightRange: from&to gridHeight (AKA m), e.g.: '2' (= '2 2'), '2 3'.
+          |Default is '$DEFAULT_M'; max value is '$MAX_M'
+          |
+          |traceLevel: '1'..'$MAX_TRACE_LEVEL'; determines what will be printed.
+          |Default is  '$DEFAULT_TRACE_LEVEL'
+          |
+          |traceSpecifier: specific aspects to be traced. Possible values:
+          |${ALLOWED_TRACESPECIFIERS.toList.sorted.map(s=>s"  '$s'").mkString("\n")}
+          |
+          |Example usage:
+          |
+          |  scala spanningtrees.Model 2 3 -1 ${ALLOWED_TRACESPECIFIERS.toList.sorted.take(3).map(s=>s"-$s").mkString(" ")}
+          |
+        """.stripMargin
+    println(msg)
+    System.exit(exitCode)
+  }
+  def errorMessage(msg: String) = println(s"Error: $msg")
+
+  def main(args: Array[String]): Unit = {
+    var     startMOption: Option[Int] = None
+    var       endMOption: Option[Int] = None
+    var traceLevelOption: Option[Int] = None
+
+    val traceSpecifiers = new mutable.HashSet[String]
+
+    try {
+      for (arg <- args) {
+        if (arg.startsWith("-")) {
+          arg.tail match {
+            case "" => usage()
+            case s if s.length==1 && s.head.isDigit => val i = s.toInt
+                                                       if (i > MAX_TRACE_LEVEL) usage()
+                                                       traceLevelOption = Some(i)
+            case s if ALLOWED_TRACESPECIFIERS.contains(s) => traceSpecifiers += s
+            case s => errorMessage(s"Illegal switch argument: $s"); usage()
+          }
+
+        }
+        else {
+          val i = arg.toInt // throws exception if not a proper int
+          if (i > MAX_M) usage()
+
+               if (startMOption.isEmpty) startMOption = Some(i)
+          else if (  endMOption.isEmpty) {
+                 if (i < startMOption.get) usage()
+                 else endMOption = Some(i)
+               }
+          else usage()
+        }
+      }
+      val startM     =     startMOption.getOrElse(DEFAULT_M)
+      val   endM     =       endMOption.getOrElse(startM)
+      val traceLevel = traceLevelOption.getOrElse(DEFAULT_TRACE_LEVEL)
+
+      for (m <- startM to endM) new Model(m, traceLevel, traceSpecifiers.toSet).run
+      // GlobalResults.printNumberOfNodesAndEdges
     }
-    for (m <- startM to endM) new Model(m).run
+    catch {
+      case e: NumberFormatException => usage()
+      case e: Exception => e.printStackTrace
+                           usage(2)
+    }
+  }
+}
+
+
+
+object GlobalResults{
+  def index(s: String) ={
+    s match {
+      case "PartitionGraph" => 0
+      case "StartPartitionLetterGraph" => 1
+      case "LetterEndPartitionGraph" => 2
+      case "ELetter" => 0
+      case "3Letter" => 1
+    }
+  }
+  var numberOfNodesAndEdges : Array[Array[(Int,Int)]] = Array.tabulate(9,6)( (x,y) => (0,0) ) // should become a class with a monad or so
+  def setNumberOfNodesAndEdges(m: Int, graph: String, letterType : String, numNodes: Int, numEdges: Int) = {
+    numberOfNodesAndEdges(m)(index(graph)*2 + index(letterType)) = (numNodes, numEdges)
+  }
+  def printNumberOfNodesAndEdges = {
+    println("Number of nodes and edges (|V|,|E|) of:\nPartitionGraph, StartPartitionLetterGraph and LetterEndPartitionGraph for E-letters and 3-Letters")
+    for (i      <- 0 until 9; //_=println();
+         j      <- 0 until 6; t=numberOfNodesAndEdges(i)(j); numNodes=t._1; numEdges=t._2;
+         if numberOfNodesAndEdges(i)(j) != (0,0)
+    ) {
+      print(s"($numNodes,$numEdges) ")
+      if (j==5) println
+    }
+    println("\n")
   }
 }
